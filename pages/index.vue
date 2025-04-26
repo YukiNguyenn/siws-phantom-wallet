@@ -15,7 +15,7 @@ const { connected, publicKey, wallet } = useWallet();
 
 const onClickSignMessage = () => {
   $fetch(
-    `${useRuntimeConfig().public.baseUrl}authentication/create-message`,
+    `${useRuntimeConfig().public.baseUrl}/authentication/create-message`,
     {
       method: 'POST',
       headers: {
@@ -40,7 +40,7 @@ const onClickSignMessage = () => {
     };
     let strPayload = JSON.stringify({ input: data.signInInput, output });
     const _ = await $fetch(
-      `${useRuntimeConfig().public.baseUrl}authentication/verify-message`,
+      `${useRuntimeConfig().public.baseUrl}/authentication/verify-message`,
       {
         method: 'POST',
         headers: {

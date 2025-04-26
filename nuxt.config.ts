@@ -22,9 +22,33 @@ export default defineNuxtConfig({
       "process.env.BROWSER": true,
     },
   },
+
+  nitro: {
+    experimental: {
+      websocket: true,
+    },
+    devProxy: {
+      'host': '127.0.0.1',
+      '/pre/api': {
+        target: process.env.API_URL,
+        prependPath: true,
+        changeOrigin: true,
+        // pathRewrite: {'^/api': '/api/v1'}
+      },
+    },
+  },
+
+  routeRules: {
+    '/pre/api/**': {
+      proxy: {
+        to: `${process.env.API_URL}/**`,
+      },
+    },
+  },
+
   runtimeConfig: {
     public: {
-      baseUrl: 'http://66.42.55.189:3010/api/'
+      baseUrl: '/pre/api'
     }
   }
 })
