@@ -48,7 +48,8 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      baseUrl: '/pre/api'
+      baseUrl: '/pre/api',
+      wsUrl: import.meta.env.WS_URL
     }
   }
 })
