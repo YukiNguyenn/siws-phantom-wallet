@@ -108,6 +108,7 @@ const connectionWS = () => {
     wsConnected.value = true
   }
   ws.value.onmessage = (event) => {
+    getData()
     const data = JSON.parse(event.data)
     console.log('Nhận tin nhắn từ server:', data)
     if (Array.isArray(data.message)) {
