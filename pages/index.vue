@@ -9,56 +9,197 @@
         <pre >{{ user }}</pre>
       </UCard>
     </template>
-    <UButton v-if="token && !ws" @click="connectionWS">Connect webwocket</UButton>
-    <UButton v-if="token && wsConnected" @click="disconnect">Disconnect webwocket</UButton>
+    <UButton v-if="token && !ws" @click="connectionWS">Connect main websocket to view all event</UButton>
+    <UButton v-if="token && wsConnected" @click="disconnect">Disconnect websocket</UButton>
+    <div class="w-full p-2 flex-wrap flex gap-2">
+      <UCard v-for="i in packages" :key="i._id" class="w-[calc(25vw-16px)]">
+        <template #header>
+          {{ i.name }}
+        </template>
+        <template #footer>
+          <UButton @click="onClickSelectPackage(i)">Buy with {{ i.price }} {{ i.currency }}</UButton>
+        </template>
+      </UCard>
+    </div>
+    <UModal
+      v-model:open="open"
+      title="Purchase Package"
+      :description="`Package: ${selectedPackage?.name}`"
+      :ui="{ footer: 'justify-end', content: 'max-w-5xl' }"
+    >
+      <template #body>
+        <UCollapsible :unmount-on-hide="false" class="flex flex-col gap-2 w-full">
+          <UButton
+            label="Reward Info"
+            color="neutral"
+            variant="subtle"
+            trailing-icon="i-lucide-chevron-down"
+            block
+          />
+
+          <template #content>
+            <pre>
+            {{ selectedPackage?.rewards }}
+          </pre>
+          </template>
+        </UCollapsible>
+        
+        <UInputNumber v-model="quantity" />
+      </template>
+
+      <template #footer>
+        <UButton label="Cancel" color="neutral" variant="outline" @click="oncancel" />
+        <UButton label="Purchase" :loading="loading" @click="onClickRequestPurchasePackage" color="neutral" />
+      </template>
+    </UModal>
   </div>
 </template>
 
 <script setup>
-import { WalletMultiButton } from 'solana-wallets-vue';
-import { useWallet } from 'solana-wallets-vue';
+import { WalletMultiButton, useWallet } from 'solana-wallets-vue'
+import { createMemoInstruction } from '@solana/spl-memo'
+import { Connection, clusterApiUrl, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
-const toast = useToast();
-const { connected, publicKey, wallet } = useWallet();
-const user = ref();
-const token = ref('');
-const ws = ref();
-const wsConnected = ref(false);
+const toast = useToast()
+const { connected, publicKey, wallet, sendTransaction } = useWallet()
+const user = ref()
+const token = ref('')
+const open = ref(false)
+const loading = ref(false)
+const ws = ref()
+const quantity = ref(1)
+const selectedPackage = ref()
+const packages = ref([])
+const config = ref()
+const wsConnected = ref(false)
+
+watch(() => open, (val) => {
+  if (!val) selectedPackage.value = undefined
+})
 
 onMounted(() => {
-  token.value = localStorage.getItem('token');
-});
+  getMasterData()
+  token.value = localStorage.getItem('token')
+  if (token.value) {
+    getData(token.value)
+  }
+})
+
+const getMasterData = () => {
+  $fetch(`${useRuntimeConfig().public.baseUrl}/masterdata`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    })
+    .then((data) => {
+      config.value = data
+    })
+}
+
+const oncancel = () => {
+  open.value = false
+}
 
 const connectionWS = () => {
-  ws.value = new WebSocket(`${useRuntimeConfig().public.wsUrl}/ws?token=${token.value}`);
+  ws.value = new WebSocket(`${useRuntimeConfig().public.wsUrl}/ws?token=${token.value}`)
     ws.value.onopen = () => {
-    wsConnected.value = true;
-  };
+    wsConnected.value = true
+  }
   ws.value.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    console.log('Nhận tin nhắn từ server:', data);
+    const data = JSON.parse(event.data)
+    console.log('Nhận tin nhắn từ server:', data)
     if (Array.isArray(data.message)) {
       data.message.forEach((item) => {
         toast.add({
           title: data.type,
           color: data.type === 'error' ? 'error' : 'primary',
           description: typeof item === 'string' ? item : JSON.stringify(item),
-        });
-      });
+        })
+      })
     } else {
       toast.add({
         title: data.type,
         color: data.type === 'error' ? 'error' : 'primary',
         description: data.message,
-      });
+      })
     }
-  };
+  }
 }
 
 const disconnect = () => {
-  ws.value.close();
-  ws.value = null;
-  wsConnected.value = false;
+  ws.value.close()
+  ws.value = null
+  wsConnected.value = false
+}
+
+const onClickSelectPackage = (pkg) => {
+  selectedPackage.value = pkg
+  open.value = true
+}
+
+const processPayment = async (data) => {
+  const connection = new Connection(clusterApiUrl('devnet'))
+  if (!publicKey.value) return
+  
+  const memoInstruction = createMemoInstruction(data.transaction.transactionId, [publicKey.value])
+  const blockhash = await connection.getLatestBlockhash()
+  const transaction = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: publicKey.value,
+      toPubkey: config.value?.settings?.wallet || 'Aho4P8t2smbr8GoQV5szmDkhpsVsJth4uVBvYRVUw6V6',
+      lamports: data.transaction.amount * LAMPORTS_PER_SOL,
+    })
+  ).add(memoInstruction)
+
+  transaction.feePayer = publicKey.value
+  transaction.recentBlockhash = blockhash.blockhash
+  const controller = new AbortController()
+  const { signal } = controller
+
+  const signature = await sendTransaction(transaction, connection);
+  await connection.confirmTransaction({
+    blockhash,
+    signature,
+    abortSignal: signal,
+  }, 'confirmed');
+}
+
+const onClickRequestPurchasePackage = () => {
+  loading.value = true
+  $fetch(`${useRuntimeConfig().public.baseUrl}/shop/create-transaction`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.value}`
+      },
+      body: JSON.stringify({
+        packageId: selectedPackage.value._id,
+        quantity: quantity.value,
+      })
+    })
+      .then(async ({ data }) => {
+        if (selectedPackage.value.currency === 'sol') {
+          processPayment(data)
+            .then((data1) => {
+              console.log(data1)
+            })
+            .finally(() => {
+              loading.value = false
+            })
+        } else {
+          loading.value = false
+        }
+      })
+      .catch((error) => {
+        toast.add({
+          title: 'Error',
+          description: `${error}`,
+        })
+        loading.value = false
+      })
 }
 
 const onClickSignMessage = () => {
@@ -102,19 +243,34 @@ const onClickSignMessage = () => {
       .then(({ data }) => {
         localStorage.setItem('token', data.accessToken);
         token.value = data.accessToken;
-        $fetch(`${useRuntimeConfig().public.baseUrl}/user/info`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${data.accessToken}`
-          }
-        })
-          .then((data) => {
-            user.value = data.data
-          })
+        getData(data.accessToken);
       })
   })
 
+}
+
+const getData = async (token) => {
+  $fetch(`${useRuntimeConfig().public.baseUrl}/user/info`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then((data) => {
+        user.value = data.data
+        $fetch(`${useRuntimeConfig().public.baseUrl}/shop`,
+          {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
+          })
+          .then((data) => {
+            packages.value = data.data
+          })
+      })
 }
 </script>
