@@ -5,14 +5,51 @@
     </ClientOnly>
     <UButton v-if="connected" @click="onClickSignMessage">Sign message</UButton>
     <template v-if="user">
-      <UCard>
-        <pre >{{ user }}</pre>
-      </UCard>
+      <UCollapsible :unmount-on-hide="false" class="flex flex-col gap-2 w-1/2">
+          <UButton
+            label="User Info"
+            color="neutral"
+            variant="subtle"
+            trailing-icon="i-lucide-chevron-down"
+            block
+          />
+
+          <template #content>
+            <pre >{{ user }}</pre>
+          </template>
+        </UCollapsible>
     </template>
-    <UButton v-if="token && !ws" @click="connectionWS">Connect main websocket to view all event</UButton>
-    <UButton v-if="token && wsConnected" @click="disconnect">Disconnect websocket</UButton>
-    <div class="w-full p-2 flex-wrap flex gap-2">
-      <UCard v-for="i in packages" :key="i._id" class="w-[calc(25vw-16px)]">
+    <div class="w-xl gap-4 flex flex-col">
+      <UButton v-if="token && !ws" @click="connectionWS">Connect main websocket to view all event</UButton>
+      <UButton v-if="token && wsConnected" @click="disconnect">Disconnect websocket</UButton>
+      <div class="flex gap-2">
+        <USelectMenu
+          v-model="itemSelected"
+          :items="items"
+          placeholder="Select Item"
+          class="w-full"
+          size="md"
+          :ui="{
+            item: 'h-[48px] p-1 gap-4 items-center',
+            itemLeading: 'gap-4',
+            // itemLeadingIcon: 'size-8',
+            itemTrailing: '',
+          }"
+        >
+          <template #item-leading="{ item }">
+            <span class="size-5 text-center">
+              <UAvatar
+                :src="item.avatar.src"
+                size="sm"
+              />
+            </span>
+          </template>
+        </USelectMenu>
+        <UButton class="shrink-0" @click="onClickBuyItem">Buy Item</UButton>
+      </div>
+    </div>
+    <div class="w-full p-2 flex-wrap flex gap-4">
+      <UCard v-for="i in packages" :key="i._id" class="w-[calc(16.6vw-16px)]" :ui="{ root: 'p-2!', header: 'p-2!', body: 'p-2!', footer: 'p-2!' }">
         <template #header>
           {{ i.name }}
         </template>
@@ -44,12 +81,12 @@
           </template>
         </UCollapsible>
         
-        <UInputNumber v-model="quantity" />
+        <UInputNumber v-model="quantity" :min="1" :max="selectedPackage.maxPerTime || 1" />
       </template>
 
       <template #footer>
         <UButton label="Cancel" color="neutral" variant="outline" @click="oncancel" />
-        <UButton label="Purchase" :loading="loading" @click="onClickRequestPurchasePackage" color="neutral" />
+        <UButton :label="`Purchase with ${quantity * selectedPackage.price} ${selectedPackage.currency}`" :loading="loading" color="neutral" @click="onClickRequestPurchasePackage" />
       </template>
     </UModal>
   </div>
@@ -73,6 +110,9 @@ const packages = ref([])
 const config = ref()
 const wsConnected = ref(false)
 
+const items = ref([])
+const itemSelected = ref()
+
 watch(() => open, (val) => {
   if (!val) selectedPackage.value = undefined
 })
@@ -82,6 +122,7 @@ onMounted(() => {
   token.value = localStorage.getItem('token')
   if (token.value) {
     getData(token.value)
+    getItems(token.value)
   }
 })
 
@@ -100,6 +141,38 @@ const getMasterData = () => {
 
 const oncancel = () => {
   open.value = false
+}
+
+const onClickBuyItem = () => {
+  if (!itemSelected.value) return
+  $fetch(`${useRuntimeConfig().public.baseUrl}/items/buy`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.value}`
+      },
+      body: JSON.stringify({
+        itemId: itemSelected.value.value,
+        quantity: 1, // or any value > 0
+      })
+    })
+      .then(async ({ data }) => {
+        processPayment(data)
+          .then((data1) => {
+            console.log(data1)
+          })
+          .finally(() => {
+            loading.value = false
+          })
+      })
+      .catch((error) => {
+        toast.add({
+          title: 'Error',
+          description: `${error.data.message}`,
+        })
+        loading.value = false
+      })
 }
 
 const connectionWS = () => {
@@ -197,7 +270,7 @@ const onClickRequestPurchasePackage = () => {
       .catch((error) => {
         toast.add({
           title: 'Error',
-          description: `${error}`,
+          description: `${error.data.message}`,
         })
         loading.value = false
       })
@@ -272,6 +345,34 @@ const getData = async (token) => {
           .then((data) => {
             packages.value = data.data
           })
+          .catch(() => {
+            token.value = ''
+            localStorage.setItem('token', '')
+          })
+      })
+}
+
+const getItems = async (token) => {
+  $fetch(`${useRuntimeConfig().public.baseUrl}/items?limit=200`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then((data) => {
+        items.value = data.data.results.map(item => {
+          return {
+            id: item._id,
+            label: item.name,
+            value: item._id,
+            avatar: {
+              src: `${useRuntimeConfig().public.baseUrl}/media/${item.slug}.png`,
+              alt: item.slug,
+            }
+          }
+        })
       })
 }
 </script>
